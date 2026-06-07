@@ -1,0 +1,81 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dakitlab"
+dynamic = ["version"]
+description =  "A simple data analysis and visualization toolkit created for use on google colaboratory."
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+keywords = [
+    "data-analysis",
+    "data-science",
+    "dataframe",
+    "pandas",
+    "polars",
+    "visualization",
+    "plotly",
+    "analytics",
+    "eda",
+    "tables",
+    "colab",
+    "jupyter",
+    "charts"
+]
+
+authors = [
+  { name = "Andrew Benyeogor Osenwe", email = "Benyeogorosenwe@gmail.com" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = [
+    "pandas>=2.0",
+    "plotly>=5.0",
+    "numpy>=1.24",
+    "polars>=1.0"
+]
+
+[project.urls]
+Documentation = "https://github.com/Andrew Benyeogor Osenwe/dakitlab#readme"
+Issues = "https://github.com/Andrew Benyeogor Osenwe/dakitlab/issues"
+Source = "https://github.com/Andrew Benyeogor Osenwe/dakitlab"
+
+[tool.hatch.version]
+path = "src/dakitlab/__about__.py"
+
+[tool.hatch.envs.types]
+extra-dependencies = [
+  "mypy>=1.0.0",
+]
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/dakitlab tests}"
+
+[tool.coverage.run]
+source_pkgs = ["dakitlab", "tests"]
+branch = true
+parallel = true
+omit = [
+  "src/dakitlab/__about__.py",
+]
+
+[tool.coverage.paths]
+dakitlab = ["src/dakitlab", "*/dakitlab/src/dakitlab"]
+tests = ["tests", "*/dakitlab/tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
