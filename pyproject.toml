@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "dakitlab"
 dynamic = ["version"]
-description =  "A simple data analysis and visualization toolkit created for use on google colaboratory."
+description =  "A simple data analysis and visualization toolkit created for use on google colaboratory or other Notebooks such as jupyter. This Python Package will help reduce repetitive notebook code and help users quickly explore, validate, and present data"
 readme = "README.md"
 requires-python = ">=3.8"
 license = "MIT"
@@ -22,7 +22,8 @@ keywords = [
     "tables",
     "colab",
     "jupyter",
-    "charts"
+    "charts",
+    "Python Notebooks
 ]
 
 authors = [
@@ -47,9 +48,9 @@ dependencies = [
 ]
 
 [project.urls]
-Documentation = "https://github.com/Andrew Benyeogor Osenwe/dakitlab#readme"
-Issues = "https://github.com/Andrew Benyeogor Osenwe/dakitlab/issues"
-Source = "https://github.com/Andrew Benyeogor Osenwe/dakitlab"
+Documentation = "https://github.com/Osenwe/dakitlab#readme"
+Issues = "https://github.com/Osenwe/dakitlab/issues"
+Source = "https://github.com/dakitlab"
 
 [tool.hatch.version]
 path = "src/dakitlab/__about__.py"
