@@ -59,10 +59,6 @@ The `Table` class automatically accepts:
 | ------- | --------- |
 | Pandas  | ✅         |
 | Polars  | ✅         |
-| Dask    | ✅         |
-| PySpark | ✅         |
-| cuDF    | ✅         |
-| Vaex    | ✅         |
 
 Internally, data is converted when necessary so users can work with their preferred dataframe library.
 

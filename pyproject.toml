@@ -23,7 +23,7 @@ keywords = [
     "colab",
     "jupyter",
     "charts",
-    "Python Notebooks
+    "Python Notebooks"
 ]
 
 authors = [
@@ -44,7 +44,8 @@ dependencies = [
     "pandas>=2.0",
     "plotly>=5.0",
     "numpy>=1.24",
-    "polars>=1.0"
+    "polars>=1.0",
+    "pyarrow"
 ]
 
 [project.urls]
