@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: MIT
 
 
-
 from .table import Table
 from .chart import Chart
 
