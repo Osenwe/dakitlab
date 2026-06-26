@@ -1,7 +1,7 @@
 """
 dakit.Table
 ===========
-A polished, Plotly-powered table display class for pandas / polars / dask /
+A fast, pure-HTML table display class for pandas / polars / dask /
 PySpark / cuDF / vaex DataFrames.
 
 Quick-start
@@ -14,33 +14,21 @@ Quick-start
 >>> t.integrity()             # column integrity report
 >>> t.data_health()           # missing-values + duplicate-rows report
 >>> t.interactive()           # paginated interactive table
->>> Table.help()              # print this help text
 """
 
 from __future__ import annotations
 
 import base64
 import html
-import textwrap
 import warnings
 from typing import Any, Callable, Literal
 
 import pandas as pd
-import plotly.graph_objects as go
 import polars as pl
 from IPython.display import HTML, display
 
 # ── Public type aliases ────────────────────────────────────────────────────────
 AlignValue = Literal["left", "center", "right"]
-
-FontFamily = Literal[
-    "Arial",
-    "Calibri",
-    "Helvetica",
-    "Times New Roman",
-    "Courier New",
-    "Verdana",
-]
 
 # Colors used for every HTML report — kept in one place so theme changes are easy
 _THEME = {
@@ -119,36 +107,120 @@ class Table:
         self.problem_rows: pd.DataFrame | None = None
 
         # ── Layout defaults ──────────────────────────────────────────────────
-        self.margin       = dict(l=20, r=20, t=60, b=20)
-        self.title_align  = 0.5
-        self.width        = 1200
-        self.height       = 700
+        self.title_align:  AlignValue      = "center"
+        self.max_height:   str             = "600px"   # CSS max-height for scroll
+        self.sticky_header: bool           = True
 
         # ── Header style defaults ────────────────────────────────────────────
-        self.header_fillcolor:   str | list[str] = _THEME["header_bg"]
+        self.header_fillcolor:   str             = _THEME["header_bg"]
         self.header_textcolor:   str             = _THEME["header_fg"]
         self.header_align:       AlignValue      = "left"
-        self.header_linecolor:   str             = _THEME["header_bg"]
         self.header_fontsize:    int             = 13
-        self.header_font_family: FontFamily      = "Arial"
+        self.header_font_family: str             = "Arial"
         self.header_bold:        bool            = True
         self.header_italic:      bool            = False
-        self.header_height:      int             = 38
 
         # ── Cell style defaults ──────────────────────────────────────────────
-        self.cell_fillcolor:   str | list[str] = [_THEME["table_even"], _THEME["table_odd"]]
-        self.cell_textcolor:   str             = _THEME["text_primary"]
-        self.cell_align:       AlignValue      = "left"
-        self.cell_linecolor:   str             = "#e5e7eb"
-        self.cell_fontsize:    int             = 11
-        self.cell_font_family: FontFamily      = "Arial"
-        self.cell_bold:        bool            = False
-        self.cell_italic:      bool            = False
-        self.cell_height:      int             = 32
+        self.cell_fillcolor:   list[str] = [_THEME["table_even"], _THEME["table_odd"]]
+        self.cell_textcolor:   str       = _THEME["text_primary"]
+        self.cell_align:       AlignValue = "left"
+        self.cell_linecolor:   str       = "#e5e7eb"
+        self.cell_fontsize:    int       = 12
+        self.cell_font_family: str       = "Arial"
+        self.cell_bold:        bool      = False
+        self.cell_italic:      bool      = False
 
         # ── Misc ─────────────────────────────────────────────────────────────
-        self.paper_bgcolor:  str            = _THEME["report_bg"]
-        self.column_widths:  list[int] | None = None
+        self.paper_bgcolor:   str             = _THEME["report_bg"]
+        self.column_widths:   list[int] | None = None
+
+    def __repr__(self) -> str:
+        rows, cols = self.dataframe.shape
+        title = f'"{self.title}"' if self.title else "no title"
+        return f"Table({rows} rows × {cols} cols, {title})"
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
+    # ── Class-level help ──────────────────────────────────────────────────────
+
+    @classmethod
+    def help(cls) -> None:
+        """
+        Print a concise reference of every public method and its purpose.
+
+        Usage
+        -----
+        >>> Table.help()
+        """
+        text = textwrap.dedent("""
+        ╔══════════════════════════════════════════════════════════════════╗
+        ║                       dakit  •  Table                           ║
+        ╚══════════════════════════════════════════════════════════════════╝
+
+        ── Construction ───────────────────────────────────────────────────
+        Table(df, header_names=None, title=None)
+            Create a Table from any supported DataFrame type.
+
+        ── Display ────────────────────────────────────────────────────────
+        .show(caption=None)
+            Render the table inline (alias for .display()).
+
+        .display(dataframe=None, filename="newtable", caption=None,
+                 max_rows=1000, show_index=False)
+            Full render with download button and row limit.
+
+        .interactive(rows_per_page=20)
+            Paginated interactive table (uses Colab DataTable when available).
+
+        ── Analysis ───────────────────────────────────────────────────────
+        .stats(columns=None, file_name="summary_stats.html",
+               mode="fast"|"full", round_digits=3, return_data=True)
+            Quantitative summary report.
+            "fast"  → count, missing, mean, std, min, max, unique, CV
+            "full"  → + median, variance, quartiles, IQR, skewness, outliers
+
+        .integrity(columns=None, rules=None, file_name="integrity_report.html",
+                   max_examples=5, return_data=True)
+            Rule-based column validation.  Pass a rules dict to add constraints:
+              rules = {
+                  "age":   {"required": True, "positive": True, "max": 120},
+                  "email": {"not_empty": True, "regex": r".+@.+"},
+                  "grade": {"allowed": ["A","B","C","D","F"]},
+              }
+            Supported per-column keys
+              Numeric : required, unique, dtype, positive, non_negative,
+                        min, max, allowed, regex, custom
+              Text    : required, unique, dtype, not_empty, isalpha,
+                        isnumeric, isalnum, allowed_chars,
+                        min_length, max_length, allowed, regex, custom
+              custom  : callable(value) → bool
+
+        .data_health(title=..., file_name="health_report.html",
+                     show_problem_rows=True, max_problem_rows=None)
+            Missing-value + duplicate-row overview with a health score.
+            After calling this, .problem_rows holds the flagged rows.
+
+        ── Styling helpers ────────────────────────────────────────────────
+        .set_layout(title, title_align, width, height, header_height,
+                    cell_height, margin, column_widths)
+
+        .set_global_style(paper_bgcolor)
+
+        .set_header_style(fillcolor, textcolor, align, linecolor,
+                          fontsize, font_family, bold, italic)
+
+        .set_cell_style(fillcolor, textcolor, align, linecolor,
+                        fontsize, font_family, bold, italic)
+
+        ── Static helpers ─────────────────────────────────────────────────
+        Table.to_pandas(dataframe)   → pd.DataFrame
+            Convert any supported type to pandas.
+
+        Table.help()                 → None
+            Print this reference.
+        """)
+        print(text)
 
     # ── Layout and style methods ──────────────────────────────────────────────
 
@@ -156,30 +228,29 @@ class Table:
         self,
         title: str | None = None,
         title_align: AlignValue | None = None,
-        width: int | None = None,
-        height: int | None = None,
-        header_height: int | None = None,
-        cell_height: int | None = None,
-        margin: dict[str, int] | None = None,
+        max_height: str | None = None,
+        sticky_header: bool | None = None,
         column_widths: list[int] | None = None,
-    ) -> None:
+    ) -> "Table":
         """
-        Adjust canvas layout settings.
+        Adjust table layout settings.
+
+        Returns ``self`` so calls can be chained.
 
         Parameters
         ----------
-        title        : str            Override the table title.
-        title_align  : "left"|"center"|"right"
-        width        : int            Canvas width in pixels.
-        height       : int            Canvas height in pixels.
-        header_height: int            Header row height in pixels.
-        cell_height  : int            Data row height in pixels.
-        margin       : dict           Keys: l, r, t, b (all ints ≥ 0).
-        column_widths: list[int]      Relative column widths.
+        title         : str              Override the table title.
+        title_align   : "left"|"center"|"right"
+        max_height    : str              CSS max-height of the scroll container,
+                                         e.g. ``"400px"``, ``"80vh"``.
+                                         Set to ``"none"`` to disable scrolling.
+        sticky_header : bool             Keep the header visible while scrolling.
+        column_widths : list[int]        Pixel widths per column.
 
         Examples
         --------
-        >>> t.set_layout(title="Q4 Results", width=1400, title_align="left")
+        >>> t.set_layout(title="Q4 Results", title_align="left", max_height="400px")
+        >>> t.set_layout(max_height="none").set_header_style(bold=True).show()
         """
         if title is not None:
             if not isinstance(title, str):
@@ -188,35 +259,28 @@ class Table:
 
         if title_align is not None:
             self._validate_align(title_align, "title_align")
-            self.title_align = {"left": 0.05, "center": 0.5, "right": 0.95}[title_align]
+            self.title_align = title_align
 
-        if width is not None:
-            self._validate_positive_int(width, "width")
-            self.width = width
+        if max_height is not None:
+            if not isinstance(max_height, str) or not max_height.strip():
+                raise ValueError("max_height must be a non-empty CSS string, e.g. '600px'.")
+            self.max_height = max_height
 
-        if height is not None:
-            self._validate_positive_int(height, "height")
-            self.height = height
-
-        if header_height is not None:
-            self._validate_positive_int(header_height, "header_height")
-            self.header_height = header_height
-
-        if cell_height is not None:
-            self._validate_positive_int(cell_height, "cell_height")
-            self.cell_height = cell_height
-
-        if margin is not None:
-            self._validate_margin(margin)
-            self.margin = margin
+        if sticky_header is not None:
+            self._validate_bool(sticky_header, "sticky_header")
+            self.sticky_header = sticky_header
 
         if column_widths is not None:
             self._validate_column_widths(column_widths)
             self.column_widths = column_widths
 
-    def set_global_style(self, paper_bgcolor: str | None = None) -> None:
+        return self
+
+    def set_global_style(self, paper_bgcolor: str | None = None) -> "Table":
         """
         Set canvas-level (background) styles.
+
+        Returns ``self`` so calls can be chained.
 
         Parameters
         ----------
@@ -230,37 +294,40 @@ class Table:
             self._validate_color(paper_bgcolor, "paper_bgcolor")
             self.paper_bgcolor = paper_bgcolor
 
+        return self
+
     def set_header_style(
         self,
-        fillcolor: str | list[str] | None = None,
+        fillcolor: str | None = None,
         textcolor: str | None = None,
         align: AlignValue | None = None,
-        linecolor: str | None = None,
         fontsize: int | None = None,
-        font_family: FontFamily | None = None,
+        font_family: str | None = None,
         bold: bool | None = None,
         italic: bool | None = None,
-    ) -> None:
+    ) -> "Table":
         """
         Customise the appearance of the header row.
 
+        Returns ``self`` so calls can be chained.
+
         Parameters
         ----------
-        fillcolor   : str | list[str]   Background colour(s).
-        textcolor   : str               Text colour.
+        fillcolor   : str    Background colour (any CSS/hex value).
+        textcolor   : str    Text colour.
         align       : "left"|"center"|"right"
-        linecolor   : str               Border colour.
-        fontsize    : int               Font size in pt.
-        font_family : FontFamily        One of the supported font names.
+        fontsize    : int    Font size in px.
+        font_family : str    Any valid CSS font family, e.g. ``"Georgia"``.
         bold        : bool
         italic      : bool
 
         Examples
         --------
         >>> t.set_header_style(fillcolor="#1a237e", fontsize=14, bold=True)
+        >>> t.set_header_style(fillcolor="#1a237e").set_cell_style(fontsize=12).show()
         """
         if fillcolor is not None:
-            self._validate_color_or_list(fillcolor, "header_fillcolor")
+            self._validate_color(fillcolor, "header_fillcolor")
             self.header_fillcolor = fillcolor
         if textcolor is not None:
             self._validate_color(textcolor, "header_textcolor")
@@ -268,14 +335,12 @@ class Table:
         if align is not None:
             self._validate_align(align, "header_align")
             self.header_align = align
-        if linecolor is not None:
-            self._validate_color(linecolor, "header_linecolor")
-            self.header_linecolor = linecolor
         if fontsize is not None:
             self._validate_positive_int(fontsize, "header_fontsize")
             self.header_fontsize = fontsize
         if font_family is not None:
-            self._validate_font_family(font_family, "header_font_family")
+            if not isinstance(font_family, str) or not font_family.strip():
+                raise ValueError("font_family must be a non-empty string.")
             self.header_font_family = font_family
         if bold is not None:
             self._validate_bool(bold, "header_bold")
@@ -284,6 +349,8 @@ class Table:
             self._validate_bool(italic, "header_italic")
             self.header_italic = italic
 
+        return self
+
     def set_cell_style(
         self,
         fillcolor: str | list[str] | None = None,
@@ -291,31 +358,35 @@ class Table:
         align: AlignValue | None = None,
         linecolor: str | None = None,
         fontsize: int | None = None,
-        font_family: FontFamily | None = None,
+        font_family: str | None = None,
         bold: bool | None = None,
         italic: bool | None = None,
-    ) -> None:
+    ) -> "Table":
         """
         Customise the appearance of data cells.
 
+        Returns ``self`` so calls can be chained.
+
         Parameters
         ----------
-        fillcolor   : str | list[str]   Single colour or alternating pair.
+        fillcolor   : str | list[str]   Single colour or alternating pair
+                                         e.g. ``["#ffffff", "#f3f4f6"]``.
         textcolor   : str
         align       : "left"|"center"|"right"
-        linecolor   : str               Border colour.
-        fontsize    : int
-        font_family : FontFamily
+        linecolor   : str               Row border colour.
+        fontsize    : int               Font size in px.
+        font_family : str               Any valid CSS font family.
         bold        : bool
         italic      : bool
 
         Examples
         --------
         >>> t.set_cell_style(fillcolor=["#e8eaf6", "#c5cae9"], fontsize=12)
+        >>> t.set_cell_style(fontsize=12).set_global_style(paper_bgcolor="#fff").show()
         """
         if fillcolor is not None:
             self._validate_color_or_list(fillcolor, "cell_fillcolor")
-            self.cell_fillcolor = fillcolor
+            self.cell_fillcolor = fillcolor if isinstance(fillcolor, list) else [fillcolor]
         if textcolor is not None:
             self._validate_color(textcolor, "cell_textcolor")
             self.cell_textcolor = textcolor
@@ -329,7 +400,8 @@ class Table:
             self._validate_positive_int(fontsize, "cell_fontsize")
             self.cell_fontsize = fontsize
         if font_family is not None:
-            self._validate_font_family(font_family, "cell_font_family")
+            if not isinstance(font_family, str) or not font_family.strip():
+                raise ValueError("font_family must be a non-empty string.")
             self.cell_font_family = font_family
         if bold is not None:
             self._validate_bool(bold, "cell_bold")
@@ -337,6 +409,8 @@ class Table:
         if italic is not None:
             self._validate_bool(italic, "cell_italic")
             self.cell_italic = italic
+
+        return self
 
     # ── Display methods ───────────────────────────────────────────────────────
 
@@ -380,11 +454,14 @@ class Table:
 
     def show(self, caption: str | None = None) -> None:
         """
-        Render the table inline.  Thin alias for :meth:`display`.
+        Render the table inline.
+
+        Alias for ``display(caption=caption)``.  Use :meth:`display` directly
+        when you need ``filename``, ``max_rows``, or ``show_index`` control.
 
         Parameters
         ----------
-        caption : str | None   Overrides the instance title for this call only.
+        caption : str | None   One-shot title override for this render only.
 
         Examples
         --------
@@ -407,7 +484,7 @@ class Table:
         Parameters
         ----------
         dataframe  : DataFrame | None   Render this instead of ``self.dataframe``.
-        filename   : str                Base filename for the PNG download.
+        filename   : str                Base filename for CSV and HTML downloads.
         caption    : str | None         Title shown above the table (one-shot override).
         max_rows   : int | None         Truncate to this many rows; ``None`` = no limit.
         show_index : bool               Prepend the DataFrame index as a column.
@@ -445,78 +522,253 @@ class Table:
             df = df.head(max_rows)
 
         headers = list(self.header_names or df.columns)
-
         if self.header_names is not None:
             self._validate_header_names(self.header_names, df)
 
-        # ── BUG FIX: was using self.cell_italic for header ──────────────────
-        headers = self._format_values(
-            headers,
-            bold=self.header_bold,
-            italic=self.header_italic,   # ← fixed (was self.cell_italic)
+        title_text  = caption or self.title or ""
+        title_align = self.title_align
+
+        # ── Column width styles ──────────────────────────────────────────────
+        col_styles = ""
+        if self.column_widths:
+            for i, w in enumerate(self.column_widths[: len(headers)]):
+                col_styles += f".dakit-t th:nth-child({i+1}), .dakit-t td:nth-child({i+1}) {{ width:{w}px; min-width:{w}px; }}\n"
+
+        # ── Alternating row colours ──────────────────────────────────────────
+        colors     = self.cell_fillcolor
+        even_color = colors[0] if colors else "#ffffff"
+        odd_color  = colors[1] if len(colors) > 1 else even_color
+
+        # ── Header cells ────────────────────────────────────────────────────
+        h_bold   = "font-weight:bold;" if self.header_bold   else ""
+        h_italic = "font-style:italic;" if self.header_italic else ""
+        th_html  = "".join(
+            f"<th>{html.escape(str(h))}</th>" for h in headers
         )
 
-        values = [df[col].tolist() for col in df.columns]
+        # ── Data rows ───────────────────────────────────────────────────────
+        c_bold   = "font-weight:bold;"   if self.cell_bold   else ""
+        c_italic = "font-style:italic;"  if self.cell_italic else ""
 
-        if self.cell_bold or self.cell_italic:
-            values = [
-                self._format_values(col_vals, bold=self.cell_bold, italic=self.cell_italic)
-                for col_vals in values
-            ]
-
-        row_colors = self._make_row_colors(len(df))
-
-        fig = go.Figure(
-            data=[
-                go.Table(
-                    columnwidth=self.column_widths,
-                    header=dict(
-                        values=headers,
-                        fill_color=self.header_fillcolor,
-                        font=dict(
-                            color=self.header_textcolor,
-                            size=self.header_fontsize,
-                            family=self.header_font_family,
-                        ),
-                        align=self.header_align,
-                        height=self.header_height,
-                        line_color=self.header_linecolor,
-                    ),
-                    cells=dict(
-                        values=values,
-                        fill_color=[row_colors],
-                        font=dict(
-                            color=self.cell_textcolor,
-                            size=self.cell_fontsize,
-                            family=self.cell_font_family,
-                        ),
-                        align=self.cell_align,
-                        height=self.cell_height,
-                        line_color=self.cell_linecolor,
-                    ),
-                )
-            ]
-        )
-
-        title_text = caption or self.title
-        layout_kwargs: dict[str, Any] = dict(
-            width=self.width,
-            height=self.height,
-            margin=self.margin,
-            paper_bgcolor=self.paper_bgcolor,
-        )
-
-        if title_text:
-            layout_kwargs["title"] = dict(
-                text=title_text,
-                x=self.title_align,
-                xanchor=self._get_title_xanchor(),
+        rows_html = []
+        for i, (_, row) in enumerate(df.iterrows()):
+            bg  = even_color if i % 2 == 0 else odd_color
+            tds = "".join(
+                f'<td style="background:{bg};">{html.escape(str(v))}</td>'
+                for v in row
             )
+            rows_html.append(f"<tr>{tds}</tr>")
 
-        fig.update_layout(**layout_kwargs)
-        fig.show(config={"toImageButtonOptions": {"filename": filename}})
+        # ── CSV download ────────────────────────────────────────────────────
+        csv_b64  = base64.b64encode(df.to_csv(index=False).encode()).decode()
+        csv_name = f"{filename}.csv"
 
-    # ── Summary statistics ────────────────────────────────────────────────────
+        # ── HTML download (full table) ───────────────────────────────────────
+        full_html = f"<html><body>{title_text}<table>{''.join(rows_html)}</table></body></html>"
+        html_b64  = base64.b64encode(full_html.encode()).decode()
+        html_name = f"{filename}.html"
+
+        sticky_style = "position:sticky; top:0; z-index:2;" if self.sticky_header else ""
+        max_h        = f"max-height:{self.max_height};" if self.max_height != "none" else ""
+
+        output = f"""
+        <style>
+        .dakit-wrap {{
+            font-family: {html.escape(self.cell_font_family)}, Arial, sans-serif;
+            background: {self.paper_bgcolor};
+            padding: 12px;
+            border-radius: 10px;
+            color-scheme: light;
+        }}
+        .dakit-wrap * {{ box-sizing: border-box; }}
+        .dakit-title {{
+            text-align: {title_align};
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: {_THEME['text_primary']};
+            font-family: {html.escape(self.header_font_family)}, Arial, sans-serif;
+        }}
+        .dakit-scroll {{
+            overflow-x: auto;
+            overflow-y: auto;
+            {max_h}
+            border-radius: 8px;
+            border: 1px solid {self.cell_linecolor};
+        }}
+        .dakit-t {{
+            border-collapse: collapse;
+            width: 100%;
+            font-size: {self.cell_fontsize}px;
+            color: {self.cell_textcolor};
+        }}
+        .dakit-t th {{
+            background: {self.header_fillcolor};
+            color: {self.header_textcolor};
+            padding: 10px 14px;
+            text-align: {self.header_align};
+            font-size: {self.header_fontsize}px;
+            font-family: {html.escape(self.header_font_family)}, Arial, sans-serif;
+            white-space: nowrap;
+            {h_bold} {h_italic}
+            {sticky_style}
+        }}
+        .dakit-t td {{
+            padding: 8px 14px;
+            border-bottom: 1px solid {self.cell_linecolor};
+            text-align: {self.cell_align};
+            white-space: nowrap;
+            {c_bold} {c_italic}
+        }}
+        .dakit-t tr:last-child td {{ border-bottom: none; }}
+        .dakit-t tr:hover td {{ filter: brightness(0.96); }}
+        {col_styles}
+        .dakit-btns {{
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }}
+        .dakit-btn {{
+            display: inline-block;
+            padding: 7px 16px;
+            background: {_THEME['btn_bg']};
+            color: {_THEME['btn_fg']} !important;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: bold;
+        }}
+        </style>
+
+        <div class="dakit-wrap">
+            {"<div class='dakit-title'>" + html.escape(title_text) + "</div>" if title_text else ""}
+            <div class="dakit-scroll">
+                <table class="dakit-t">
+                    <thead><tr>{th_html}</tr></thead>
+                    <tbody>{"".join(rows_html)}</tbody>
+                </table>
+            </div>
+            <div class="dakit-btns">
+                <a class="dakit-btn" href="data:text/csv;base64,{csv_b64}" download="{html.escape(csv_name)}">
+                    ⬇ Download CSV
+                </a>
+                <a class="dakit-btn" href="data:text/html;base64,{html_b64}" download="{html.escape(html_name)}">
+                    ⬇ Download HTML
+                </a>
+            </div>
+        </div>
+        """
+
+        display(HTML(output))
+
+    def download(
+        self,
+        filename: str = "download",
+        n_rows: int | None = None,
+        randomize: bool = False,
+        seed: int | None = None,
+    ) -> None:
+        """
+        Render a download button for a CSV sample or the full dataset.
+
+        Parameters
+        ----------
+        filename  : str        Base filename (without extension). Default ``"download"``.
+        n_rows    : int | None Number of rows to include. ``None`` = all rows.
+        randomize : bool       If ``True``, sample randomly instead of taking the
+                            first ``n_rows`` rows. Ignored when ``n_rows`` is ``None``.
+        seed      : int | None Random seed for reproducibility (used only when
+                            ``randomize=True``).
+
+        Examples
+        --------
+        >>> t.download()                                      # full dataset
+        >>> t.download(n_rows=100)                            # first 100 rows
+        >>> t.download(n_rows=100, randomize=True)            # 100 random rows
+        >>> t.download(n_rows=100, randomize=True, seed=42)   # reproducible sample
+        >>> t.download(filename="q4_sample", n_rows=500, randomize=True)
+        """
+        self._validate_filename(filename)
+
+        df = self.dataframe.copy()
+
+        if n_rows is not None:
+            self._validate_positive_int(n_rows, "n_rows")
+
+            if n_rows > len(df):
+                warnings.warn(
+                    f"n_rows ({n_rows}) exceeds the number of rows in the DataFrame "
+                    f"({len(df)}). Downloading all rows instead.",
+                    stacklevel=2,
+                )
+                n_rows = len(df)
+
+            if randomize:
+                df = df.sample(n=n_rows, random_state=seed)
+            else:
+                df = df.head(n_rows)
+
+        total_rows  = len(df)
+        sample_note = (
+            f"All {total_rows:,} rows"
+            if n_rows is None
+            else f"{'Random' if randomize else 'First'} {total_rows:,} rows"
+            + (f" (seed={seed})" if randomize and seed is not None else "")
+        )
+
+        csv_b64  = base64.b64encode(df.to_csv(index=False).encode()).decode()
+        csv_name = f"{filename}.csv"
+
+        output = f"""
+        <style>
+        .dakit-dl-wrap {{
+            font-family: Arial, sans-serif;
+            background: {self.paper_bgcolor};
+            padding: 12px 16px;
+            border-radius: 10px;
+            display: inline-flex;
+            align-items: center;
+            gap: 16px;
+            border: 1px solid {self.cell_linecolor};
+        }}
+        .dakit-dl-meta {{
+            font-size: 13px;
+            color: {_THEME['text_secondary']};
+            line-height: 1.5;
+        }}
+        .dakit-dl-meta strong {{
+            color: {_THEME['text_primary']};
+            display: block;
+            font-size: 14px;
+            margin-bottom: 2px;
+        }}
+        .dakit-btn {{
+            display: inline-block;
+            padding: 8px 18px;
+            background: {_THEME['btn_bg']};
+            color: {_THEME['btn_fg']} !important;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: bold;
+            white-space: nowrap;
+        }}
+        </style>
+        <div class="dakit-dl-wrap">
+            <div class="dakit-dl-meta">
+                <strong>⬇ {html.escape(csv_name)}</strong>
+                {html.escape(sample_note)}
+            </div>
+            <a class="dakit-btn"
+            href="data:text/csv;base64,{csv_b64}"
+            download="{html.escape(csv_name)}">
+                Download CSV
+            </a>
+        </div>
+        """
+
+        display(HTML(output))
+        # ── Summary statistics ────────────────────────────────────────────────────
 
     def stats(
         self,
@@ -1182,34 +1434,6 @@ class Table:
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
-    def _get_title_xanchor(self) -> str:
-        if self.title_align <= 0.3:
-            return "left"
-        if self.title_align >= 0.7:
-            return "right"
-        return "center"
-
-    def _make_row_colors(self, row_count: int) -> list[str]:
-        colors = self.cell_fillcolor
-        if isinstance(colors, str):
-            return [colors] * row_count
-        # Tile using integer division + slice — avoids Python-level loop
-        repeats = (row_count + len(colors) - 1) // len(colors)
-        return (colors * repeats)[:row_count]
-
-    @staticmethod
-    def _format_values(
-        values: list[Any],
-        bold: bool = False,
-        italic: bool = False,
-    ) -> list[str]:
-        formatted = [html.escape(str(v)) for v in values]
-        if bold:
-            formatted = [f"<b>{v}</b>" for v in formatted]
-        if italic:
-            formatted = [f"<i>{v}</i>" for v in formatted]
-        return formatted
-
     @staticmethod
     def _to_polars(dataframe: Any) -> pl.DataFrame:
         if isinstance(dataframe, pl.DataFrame):
@@ -1519,19 +1743,6 @@ class Table:
             raise ValueError(f"{name} must be one of {valid}.")
 
     @staticmethod
-    def _validate_margin(margin: dict[str, int]) -> None:
-        if not isinstance(margin, dict):
-            raise TypeError("margin must be a dictionary.")
-        required = {"l", "r", "t", "b"}
-        if not required.issubset(margin):
-            raise ValueError("margin must contain l, r, t, and b.")
-        for key, value in margin.items():
-            if not isinstance(value, int):
-                raise TypeError(f"margin['{key}'] must be an integer.")
-            if value < 0:
-                raise ValueError(f"margin['{key}'] cannot be negative.")
-
-    @staticmethod
     def _validate_color(value: str, name: str) -> None:
         if not isinstance(value, str):
             raise TypeError(f"{name} must be a string color value.")
@@ -1549,12 +1760,6 @@ class Table:
                 Table._validate_color(color, name)
         else:
             raise TypeError(f"{name} must be a string or a list of strings.")
-
-    @staticmethod
-    def _validate_font_family(value: str, name: str = "font_family") -> None:
-        valid = ("Arial", "Calibri", "Helvetica", "Times New Roman", "Courier New", "Verdana")
-        if value not in valid:
-            raise ValueError(f"{name} must be one of {valid}.")
 
     @staticmethod
     def _validate_bool(value: bool, name: str) -> None:
