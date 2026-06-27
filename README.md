@@ -193,6 +193,7 @@ If `n_rows` exceeds the number of rows in the DataFrame, a warning is raised and
 ### set_layout()
 
 Control title text and alignment, scroll height, sticky header behaviour, and column widths. Returns `self` for chaining.
+Note: column_width also accept dictionaries e.g {2: 100, 6:400} means you want the make column 2 and 6 to be 100pts and 600pts wide respectively
 
 ```python
 table.set_layout(

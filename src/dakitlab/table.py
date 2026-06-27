@@ -230,7 +230,7 @@ class Table:
         title_align: AlignValue | None = None,
         max_height: str | None = None,
         sticky_header: bool | None = None,
-        column_widths: list[int] | None = None,
+        column_widths: list[int] | dict[int, int] = None,
     ) -> "Table":
         """
         Adjust table layout settings.
@@ -271,9 +271,13 @@ class Table:
             self.sticky_header = sticky_header
 
         if column_widths is not None:
-            self._validate_column_widths(column_widths)
-            self.column_widths = column_widths
-
+            if not isinstance(column_widths, (list, dict)):
+                raise TypeError("column_widths must be a list or dict of {col_index: width}.")
+            self.column_widths = (
+                column_widths
+                if isinstance(column_widths, dict)
+                else {i: w for i, w in enumerate(column_widths)}
+            )
         return self
 
     def set_global_style(self, paper_bgcolor: str | None = None) -> "Table":
@@ -531,9 +535,11 @@ class Table:
         # ── Column width styles ──────────────────────────────────────────────
         col_styles = ""
         if self.column_widths:
-            for i, w in enumerate(self.column_widths[: len(headers)]):
-                col_styles += f".dakit-t th:nth-child({i+1}), .dakit-t td:nth-child({i+1}) {{ width:{w}px; min-width:{w}px; }}\n"
-
+            for i, w in self.column_widths.items():
+                col_styles += (
+                    f".dakit-t th:nth-child({i+1}), .dakit-t td:nth-child({i+1}) "
+                    f"{{ min-width:{w}px; max-width:{w}px; white-space:normal; word-wrap:break-word; overflow-wrap:break-word; }}\n"
+                )
         # ── Alternating row colours ──────────────────────────────────────────
         colors     = self.cell_fillcolor
         even_color = colors[0] if colors else "#ffffff"
@@ -1774,17 +1780,14 @@ class Table:
             raise ValueError("filename cannot be empty.")
 
     @staticmethod
-    def _validate_column_widths(column_widths: list[int]) -> None:
-        if not isinstance(column_widths, list):
-            raise TypeError("column_widths must be a list of integers.")
-        if not column_widths:
-            raise ValueError("column_widths cannot be empty.")
-        for w in column_widths:
-            if not isinstance(w, int):
-                raise TypeError("Each column width must be an integer.")
-            if w <= 0:
-                raise ValueError("Each column width must be greater than 0.")
-
+    def _validate_column_widths(column_widths) -> None:
+        if not isinstance(column_widths, (list, dict)):
+            raise TypeError("column_widths must be a list or dict.")
+        items = column_widths.items() if isinstance(column_widths, dict) else enumerate(column_widths)
+        for k, w in items:
+            if not isinstance(w, int) or w <= 0:
+                raise ValueError(f"Width for column {k} must be a positive integer.")
+        
     @staticmethod
     def _dtype_matches(dtype: pl.DataType, expected: str) -> bool:
         expected = str(expected).lower()
@@ -1796,4 +1799,4 @@ class Table:
             return dtype == pl.Boolean
         if expected in ("date", "datetime", "time"):
             return dtype in (pl.Date, pl.Datetime, pl.Time)
-        return str(dtype).lower() == expected
+        return str(dtype).lower() == expectedse
